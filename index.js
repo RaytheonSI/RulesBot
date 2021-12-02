@@ -132,6 +132,7 @@ function logWithTimestamp(message)
     const now = new Date().toLocaleString();
     console.log(`${now}: ${message}`);
 }
+
 async function postToChannels(config, appUserId, rules)
 {
     try
