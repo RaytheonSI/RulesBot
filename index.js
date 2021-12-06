@@ -1,11 +1,11 @@
 const configUtil = require('./config.js');
 const rulesUtil = require('./rules.js');
 
-const slackWebApi = require('@slack/web-api');
-
-const express = require('express');
-const bodyParser = require('body-parser');
 const axios = require('axios');
+const bodyParser = require('body-parser');
+const express = require('express');
+const slackWebApi = require('@slack/web-api');
+const winston = require('winston');
 
 const headerBlock = {
     type: 'section',
@@ -49,6 +49,26 @@ const VIEW_ALL_BUTTON_BLOCK = {
     ]
 };
 
+const logger = winston.createLogger({
+    level: 'info',
+    format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.colorize(),
+        winston.format.splat(),
+        winston.format.printf((info) => {
+            if (typeof info.message === 'object')
+            {
+                info.message = JSON.stringify(info.message, null, 2);
+            }
+
+            return `${info.timestamp} ${info.level}: ${info.message}`;
+        })
+    ),
+    transports: [
+        new winston.transports.Console()
+    ]
+});
+
 let config = null;
 
 try
@@ -57,8 +77,8 @@ try
 }
 catch (err)
 {
-    console.error('Failed to load config.json');
-    console.error(err);
+    logger.error('Failed to load config.json');
+    logger.error(err);
     process.exit(1);
 }
 
@@ -74,8 +94,8 @@ try
 }
 catch (err)
 {
-    console.error('Failed to load rules.txt');
-    console.error(err);
+    logger.error('Failed to load rules.txt');
+    logger.error(err);
     process.exit(1);
 }
 
@@ -88,6 +108,9 @@ async function lookupUserId(userName)
     // While the user list is supposed to be paginated, 
     // in practice all users are returned
     const list = await client.users.list();
+    logger.debug('Users: %O', list.members.map((user) => {
+        return { id: user.id, name: user.name, real_name: user.real_name };
+    }));
     const user = list.members.find(user => user.real_name === userName);
 
     return user ? user.id : user;
@@ -127,14 +150,10 @@ function abbrevTitle(rule)
            rule.title.substr(0, LOG_TITLE_LENGTH) + '...';
 }
 
-function logWithTimestamp(message)
-{
-    const now = new Date().toLocaleString();
-    console.log(`${now}: ${message}`);
-}
-
 async function postToChannels(config, appUserId, rules)
 {
+    logger.verbose('Checking if channel(s) need rule post');
+
     try
     {
         let cursor = '';
@@ -148,33 +167,39 @@ async function postToChannels(config, appUserId, rules)
                 if (config.rulePosts.channels !== 'all' &&
                     !config.rulePosts.channels.includes(channel.name))
                 {
+                    logger.verbose(`Skipping unmatched channel "${channel.name}"`);
                     return;
                 }
         
                 if (channel.num_members < config.rulePosts.minMembers)
                 {
+                    logger.verbose(`Skipping channel "${channel.name}" with only ` +
+                                   `${channel.num_members} members`);
                     return;
                 }
         
                 // Join the bot to the channel if not a member
                 if (!channel.is_member)
                 {
-                    logWithTimestamp(`Joining ${channel.name}`);
+                    logger.info(`Joining ${channel.name}`);
                     const join = await client.conversations.join({ channel: channel.id });
                     if (!join.ok)
                     {
-                        console.warn(`Failed to join "${channel.name}": ${join.error}`);
+                        logger.warn(`Failed to join "${channel.name}": ${join.error}`);
                         return;
                     }
                 }
         
                 // Look up enough message history to deter if the bot needs to post again
+                logger.verbose(`Loading last ${config.rulePosts.postEveryMsgs}`+
+                               ` messages from "${channel.name}"`);
                 const history =
                     await client.conversations.history({ channel: channel.id,
                                                          limit: config.rulePosts.postEveryMsgs });
                 if (history.messages.some(message => message.user == appUserId &&
                                                      message.subtype !== 'channel_join'))
                 {
+                    logger.verbose('Found qualified rule message in history');
                     return;
                 }
         
@@ -188,7 +213,7 @@ async function postToChannels(config, appUserId, rules)
                 });
         
                 const title = abbrevTitle(message.rule);
-                logWithTimestamp(`Posted rule "${title}" to channel "${channel.name}"`);
+                logger.info(`Posted rule "${title}" to channel "${channel.name}"`);
             });
 
             cursor = list.response_metadata.next_cursor;
@@ -196,8 +221,8 @@ async function postToChannels(config, appUserId, rules)
     }
     catch (err)
     {
-        console.warn('Failed while checking channel(s)');
-        console.warn(err);
+        logger.warn('Failed while checking channel(s)');
+        logger.warn(err);
     }
 }
 
@@ -207,17 +232,17 @@ async function postToChannels(config, appUserId, rules)
     const appUserId = await lookupUserId(config.appName);
     if (!appUserId)
     {
-        console.error(`Could not find user ID for "${config.appName}"`);
+        logger.error(`Could not find user ID for "${config.appName}"`);
         process.exit(1);
     }
-    console.log(`The app user ID for "${config.appName}" is "${appUserId}"`);
+    logger.info(`The app user ID for "${config.appName}" is "${appUserId}"`);
 
     // Poll the qualified channels content and post a rule when there
     // hasn't been one for the specified number of messages
     const channels = Array.isArray(config.rulePosts.channels) ?
-                    config.rulePosts.channels.join(', ') :
-                    config.rulePosts.channels;
-    console.log(`Checking if rule posts needed on ${channels} channel(s) ` +
+                     config.rulePosts.channels.join(', ') :
+                     config.rulePosts.channels;
+    logger.info(`Checking if rule posts needed on ${channels} channel(s) ` +
                 `every ${config.rulePosts.checkEverySecs} seconds`);
 
     setInterval(postToChannels, config.rulePosts.checkEverySecs * 1000, config, appUserId, rules);
@@ -271,8 +296,8 @@ app.post('/', async (req, res) => {
     }
     catch (err)
     {
-        console.warn('Failed to parse Slack action payload');
-        console.warn(err);
+        logger.warn('Failed to parse Slack action payload');
+        logger.warn(err);
 
         res.status(400).end();
         return;
@@ -293,13 +318,13 @@ app.post('/', async (req, res) => {
 
         res.status(200).end();
     
-        logWithTimestamp(`Posted ephemeral message containing all rules to "${user}" ` +
-                         `in "${channel}"`);
+        logger.info(`Posted ephemeral message containing all rules to "${user}" ` +
+                    `in "${channel}"`);
     }
     catch (err)
     {
-        console.warn('Failed to send response to Slack action');
-        console.warn(err);
+        logger.warn('Failed to send response to Slack action');
+        logger.warn(err);
 
         res.status(500).end();
         return;
@@ -313,18 +338,18 @@ app.post('/rule', (req, res) => {
        .send({ response_type: 'in_channel', blocks: message.blocks });
 
     const title = abbrevTitle(message.rule);
-    logWithTimestamp(`Posted rule "${title}" to "${req.body.channel_name}" in response to ` +
-                     `the slash command from "${req.body.user_name}"`);
+    logger.info(`Posted rule "${title}" to "${req.body.channel_name}" in response to ` +
+                `the slash command from "${req.body.user_name}"`);
 });
 
 app.post('/rules', (req, res) => {
     res.status(200)
        .send({ response_type: 'in_channel', text: rulesUtil.formatRule(rules) });
 
-    logWithTimestamp(`Posted rules to "${req.body.channel_name}" in response to the slash ` +
-                    `command from "${req.body.user_name}"`);
+       logger.info(`Posted rules to "${req.body.channel_name}" in response to the slash ` +
+                   `command from "${req.body.user_name}"`);
 });
 
 app.listen(config.listeningPort, () => {
-    console.log(`Listening for request from Slack on port ${config.listeningPort}`);
+    logger.info(`Listening for request from Slack on port ${config.listeningPort}`);
 });

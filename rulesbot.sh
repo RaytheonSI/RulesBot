@@ -44,7 +44,7 @@ if [[ $command == "start" ]]; then
 
     logfile="rulesbot.log"
 
-    nohup node index.js &> $logfile &
+    nohup node index.js >> $logfile 2>&1 &
     
     pid=$!
     echo $pid > $pidfile
