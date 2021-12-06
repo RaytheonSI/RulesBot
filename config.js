@@ -12,6 +12,10 @@ function validateStringArray(value, required, specialValue, name, description)
     {
         validatePresent(value, name, description);
     }
+    else if (typeof value === 'undefined')
+    {
+        return;
+    }
 
     if (value === specialValue) return;
 
@@ -26,7 +30,7 @@ function validateStringArray(value, required, specialValue, name, description)
         {
             msg += ' be ';
         }
-        msg += ' an array';
+        msg += 'an array';
         throw msg;
     }
 
@@ -45,6 +49,10 @@ function validateInt(value, required, min, max, name, description)
     if (required)
     {
         validatePresent(value, name, description);
+    }
+    else if (typeof value === 'undefined')
+    {
+        return;
     }
 
     if (!Number.isInteger(value))
