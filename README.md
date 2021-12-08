@@ -20,18 +20,11 @@ Select `Interactivity & Shortcuts` from the menu under `Features`
 2. Enter the address to RulesBot in the `Request URL` field (e.g. http://myhost:8080)
 3. Click `Save Changes`
 
-Select `Slash Commands` from the menu under `Features`
+Select `Event Subscriptions` from the menu under `Features`
 
-1. Click the `Create New Command` button
-2. Enter the following values and click `Save`
-    - `Command`: /rule
-    - `Request URL`: the address to RulesBot with a **/rule** suffix (e.g. http://myhost:8080/rule)
-    - `Short Description`: Post a random rule
-3. Enter the following values and click `Save`
-    - `Command`: /rules
-    - `Request URL`: the address to RulesBot with a **/rules** suffix (e.g. http://myhost:8080/rules)
-    - `Short Description`: Post all rules
-
+1. Turn the `Enable Events` switch on
+2. Enter the address to RulesBot in the `Request URL` field with an **/events** suffix (e.g. http://myhost:8080/events); Note that RulesBot must already be running at the `Request URL` for this step to succeed
+3. Expand `Subscribe to bot events`, click `Add Bot User Event`, and select `app_mention`
 
 Select `OAuth & Permissions` from the menu under `Features`
 

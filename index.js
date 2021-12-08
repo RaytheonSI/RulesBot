@@ -77,8 +77,7 @@ try
 }
 catch (err)
 {
-    logger.error('Failed to load config.json');
-    logger.error(err);
+    logger.error('Failed to load config.json: %O', err);
     process.exit(1);
 }
 
@@ -94,8 +93,7 @@ try
 }
 catch (err)
 {
-    logger.error('Failed to load rules.txt');
-    logger.error(err);
+    logger.error('Failed to load rules.txt: %O', err);
     process.exit(1);
 }
 
@@ -103,17 +101,31 @@ headerBlock.text.text += '*' + rules.title + '*';
 
 const client = new slackWebApi.WebClient(config.token);
 
-async function lookupUserId(userName)
+async function lookupUserIdByName(name)
 {
-    // While the user list is supposed to be paginated, 
+    // While the user list is supposed to be paginated,
     // in practice all users are returned
     const list = await client.users.list();
     logger.debug('Users: %O', list.members.map((user) => {
         return { id: user.id, name: user.name, real_name: user.real_name };
     }));
-    const user = list.members.find(user => user.real_name === userName);
+    const user = list.members.find(user => user.real_name === name);
 
     return user ? user.id : user;
+}
+
+async function lookupUserNameById(id)
+{
+    const info = await client.users.info({ user: id });
+    logger.debug('User info: %O', info);
+    return info.ok ? info.user.name : null;
+}
+
+async function lookupChannelNameById(id)
+{
+    const info = await client.conversations.info({ channel: id });
+    logger.debug('Channel info: %O', info);
+    return info.ok ? info.channel.name : null;
 }
 
 function constructRandomRuleMessage()
@@ -221,20 +233,30 @@ async function postToChannels(config, appUserId, rules)
     }
     catch (err)
     {
-        logger.warn('Failed while checking channel(s)');
-        logger.warn(err);
+        logger.warn('Failed to check channel(s): %O', err);
     }
 }
 
 (async () => {
     // Look up the user ID of the bot so we can determine how many 
     // messages ago it posted to each qualified channel
-    const appUserId = await lookupUserId(config.appName);
-    if (!appUserId)
+    let appUserId = null;
+
+    try
     {
-        logger.error(`Could not find user ID for "${config.appName}"`);
+        appUserId = await lookupUserIdByName(config.appName);
+        if (!appUserId)
+        {
+            throw `User "${config.appName}" not found`;
+        }
+    }
+    catch (err)
+    {
+        logger.error('Could not lookup user ID for app: %O', err);
         process.exit(1);
     }
+
+
     logger.info(`The app user ID for "${config.appName}" is "${appUserId}"`);
 
     // Poll the qualified channels content and post a rule when there
@@ -252,11 +274,14 @@ async function postToChannels(config, appUserId, rules)
 const app = express();
 
 app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
 
+// An endpoint to identify this service (not used by Slack)
 app.get('/', (req, res) => {
     res.send('RulesBot');
 });
 
+// An endpoint to handle actions (e.g. when buttons on posts are clicked)
 app.post('/', async (req, res) => {
     let responseUrl = '';
     let user = '';
@@ -296,10 +321,9 @@ app.post('/', async (req, res) => {
     }
     catch (err)
     {
-        logger.warn('Failed to parse Slack action payload');
-        logger.warn(err);
-
         res.status(400).end();
+
+        logger.warn('Failed to parse Slack action payload: %O', err);
         return;
     }
 
@@ -323,31 +347,112 @@ app.post('/', async (req, res) => {
     }
     catch (err)
     {
-        logger.warn('Failed to send response to Slack action');
-        logger.warn(err);
-
         res.status(500).end();
+
+        logger.warn('Failed to send response to Slack action: %O', err);
         return;
     }
 });
 
-app.post('/rule', (req, res) => {
-    const message = constructRandomRuleMessage();
-    
-    res.status(200)
-       .send({ response_type: 'in_channel', blocks: message.blocks });
+// An endpoint to handle events (e.g. users chatting with this bot)
+app.post('/events', async (req, res) => {
+    const payload = req.body;
 
-    const title = abbrevTitle(message.rule);
-    logger.info(`Posted rule "${title}" to "${req.body.channel_name}" in response to ` +
-                `the slash command from "${req.body.user_name}"`);
-});
+    if (payload.type === 'url_verification')
+    {
+        res.status(200).send(payload.challenge);
 
-app.post('/rules', (req, res) => {
-    res.status(200)
-       .send({ response_type: 'in_channel', text: rulesUtil.formatRule(rules) });
+        logger.info('Responded to URL verification challenge');
+        return;
+    }
 
-       logger.info(`Posted rules to "${req.body.channel_name}" in response to the slash ` +
-                   `command from "${req.body.user_name}"`);
+    if (payload.type === 'event_callback')
+    {
+        const event = payload.event;
+
+        if (event.type !== 'app_mention')
+        {
+            res.status(500).end();
+
+            logger.warn(`Received unsupported event type ${event.type}`);
+            return;
+        }
+
+        res.status(200).end();
+
+        // Post a response based on the message content
+        let message = null;
+
+        if (event.text.includes('rules'))
+        {
+            message = {
+                title: 'rules',
+                text: rulesUtil.formatRule(rules)
+            };
+        }
+        else if (event.text.includes('rule'))
+        {
+            const ruleMessage = constructRandomRuleMessage();
+            const title = abbrevTitle(ruleMessage.rule);
+
+            message = {
+                title: `rule "${title}"`,
+                text: ruleMessage.text,
+                blocks: ruleMessage.blocks
+            };
+        }
+        else
+        {
+            message = {
+                title: 'hints',
+                text: 'I didn\'t understand your message. ' +
+                      'Try "Tell me a random rule" or "Tell me all rules".'
+            };
+        }
+
+        try
+        {
+            client.chat.postMessage({
+                channel: event.channel,
+                text: message.text,
+                blocks: message.blocks
+            });
+        }
+        catch (err)
+        {
+            logger.error(`Failed to post message in response to "${event.text}"`);
+            return;
+        }
+
+        let channel = '';
+        try
+        {
+            channel = await lookupChannelNameById(event.channel) || event.channel;
+        }
+        catch (err)
+        {
+            channel = event.channel;
+        }
+
+        let user = '';
+        try
+        {
+            user = await lookupUserNameById(event.user) || event.user;
+        }
+        catch (err)
+        {
+            user = event.user;
+        }
+
+        logger.info(`Posted ${message.title} to "${channel}" in response to ` +
+                    `"${event.text}" from "${user}"`);
+    }
+    else
+    {
+        res.status(500).end();
+
+        logger.warn(`Received unsupported payload type ${payload.type}`);
+    }
 });
 
 app.listen(config.listeningPort, () => {
