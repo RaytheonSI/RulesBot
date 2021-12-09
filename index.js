@@ -1,5 +1,6 @@
 const configUtil = require('./config.js');
 const rulesUtil = require('./rules.js');
+const logsUtil = require('./logs.js');
 
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -114,18 +115,18 @@ async function lookupUserIdByName(name)
     return user ? user.id : user;
 }
 
-async function lookupUserNameById(id)
+async function lookupUserById(id)
 {
     const info = await client.users.info({ user: id });
     logger.debug('User info: %O', info);
-    return info.ok ? info.user.name : null;
+    return info.ok ? info.user : null;
 }
 
-async function lookupChannelNameById(id)
+async function lookupChannelById(id)
 {
     const info = await client.conversations.info({ channel: id });
     logger.debug('Channel info: %O', info);
-    return info.ok ? info.channel.name : null;
+    return info.ok ? info.channel : null;
 }
 
 function constructRandomRuleMessage()
@@ -282,7 +283,7 @@ app.get('/', (req, res) => {
 });
 
 // An endpoint to handle actions (e.g. when buttons on posts are clicked)
-app.post('/', async (req, res) => {
+app.post('/actions', async (req, res) => {
     let responseUrl = '';
     let user = '';
     let channel = '';
@@ -424,34 +425,106 @@ app.post('/events', async (req, res) => {
             return;
         }
 
-        let channel = '';
+        let channelName = event.channel;
         try
         {
-            channel = await lookupChannelNameById(event.channel) || event.channel;
+            const channel = await lookupChannelById(event.channel);
+            if (channel)
+            {
+                channelName = channel.name;
+            }
         }
         catch (err)
         {
-            channel = event.channel;
+            // Do nothing - use channel ID in log below
         }
 
-        let user = '';
+        let userName = event.user;
         try
         {
-            user = await lookupUserNameById(event.user) || event.user;
+            const user = await lookupUserById(event.user);
+            if (user)
+            {
+                userName = user.name;
+            }
         }
         catch (err)
         {
-            user = event.user;
+            // Do nothing - use user ID in log below
         }
 
-        logger.info(`Posted ${message.title} to "${channel}" in response to ` +
-                    `"${event.text}" from "${user}"`);
+        logger.info(`Posted ${message.title} to "${channelName}" in response to ` +
+                    `"${event.text}" from "${userName}"`);
     }
     else
     {
         res.status(500).end();
 
         logger.warn(`Received unsupported payload type ${payload.type}`);
+    }
+});
+
+// An endpoint for administrating (accessed via a slash command)
+const commandHandlers = {
+    'logs': logsUtil.loadLogs
+};
+
+app.post('/admin', async (req, res) => {
+    const payload = req.body;
+
+    const commandInfo = `admin command "${payload.text}" from "${payload.user_name}" ` +
+                        `in channel "${payload.channel_name}"`;
+
+    // Validate requesting user is an admin
+    try
+    {
+        const user = await lookupUserById(payload.user_id);
+        if (!user)
+        {
+            throw 'User lookup failed';
+        }
+
+        if (!user.is_admin)
+        {
+            res.status(200)
+               .send({ text: 'Sorry, you must be a workspace admin to use this command' });
+
+            logger.warn('Non-admin user tried to use ' + commandInfo);
+            return;
+        }
+    }
+    catch (err)
+    {
+        res.status(500).end();
+
+        console.error(`Failed to look up user by ID "${payload.user_id}": %O`, err);
+        return;
+    }
+
+    // Lookup corresponding command handler and use to determine reply
+    let args = payload.text.split(' ');
+
+    const handler = commandHandlers[args[0]];
+    args.shift();
+
+    try
+    {
+        const message = handler ?
+                        await handler(args) :
+                        'Available commands: ' + Object.keys(commandHandlers)
+                                                       .map(c => '*' + c + '*')
+                                                       .join(', ');
+
+        res.status(200)
+           .send({ text: message });
+
+        logger.info('Handled ' + commandInfo);
+    }
+    catch (err)
+    {
+        res.status(500).end();
+
+        console.error('Failed to handle ' + commandInfo + ': %O', err);
     }
 });
 
