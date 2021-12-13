@@ -1,6 +1,17 @@
-const configUtil = require('./config.js');
+let configUtit = null;
+try
+{
+    configUtil = require('./config.js');
+}
+catch (err)
+{
+    logger.error(`Failed to load ${configUtil.CONFIG_FILE}: %O`, err);
+    process.exit(1);
+}
+
 const rulesUtil = require('./rules.js');
 const logsUtil = require('./logs.js');
+const CommandHandlers = require('./command.js').CommandHandlers;
 
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -70,17 +81,7 @@ const logger = winston.createLogger({
     ]
 });
 
-let config = null;
-
-try
-{
-    config = configUtil.loadConfig('./config.json');
-}
-catch (err)
-{
-    logger.error('Failed to load config.json: %O', err);
-    process.exit(1);
-}
+const config = configUtil.getConfig();
 
 let rules = null;
 
@@ -102,7 +103,7 @@ headerBlock.text.text += '*' + rules.title + '*';
 
 const client = new slackWebApi.WebClient(config.token);
 
-async function lookupUserIdByName(name)
+async function lookupUserIdByRealName(name)
 {
     // While the user list is supposed to be paginated,
     // in practice all users are returned
@@ -163,9 +164,9 @@ function abbrevTitle(rule)
            rule.title.substr(0, LOG_TITLE_LENGTH) + '...';
 }
 
-async function postToChannels(config, appUserId, rules)
+async function checkChannels(config, appUserId, rules)
 {
-    logger.verbose('Checking if channel(s) need rule post');
+    logger.verbose('Checking if rule posts needed');
 
     try
     {
@@ -180,13 +181,13 @@ async function postToChannels(config, appUserId, rules)
                 if (config.rulePosts.channels !== 'all' &&
                     !config.rulePosts.channels.includes(channel.name))
                 {
-                    logger.verbose(`Skipping unmatched channel "${channel.name}"`);
+                    logger.verbose(`Skipping unmatched channel #${channel.name}`);
                     return;
                 }
         
                 if (channel.num_members < config.rulePosts.minMembers)
                 {
-                    logger.verbose(`Skipping channel "${channel.name}" with only ` +
+                    logger.verbose(`Skipping channel #${channel.name} with only ` +
                                    `${channel.num_members} members`);
                     return;
                 }
@@ -194,18 +195,18 @@ async function postToChannels(config, appUserId, rules)
                 // Join the bot to the channel if not a member
                 if (!channel.is_member)
                 {
-                    logger.info(`Joining ${channel.name}`);
+                    logger.info(`Joining #${channel.name}`);
                     const join = await client.conversations.join({ channel: channel.id });
                     if (!join.ok)
                     {
-                        logger.warn(`Failed to join "${channel.name}": ${join.error}`);
+                        logger.warn(`Failed to join #${channel.name}: ${join.error}`);
                         return;
                     }
                 }
         
                 // Look up enough message history to deter if the bot needs to post again
                 logger.verbose(`Loading last ${config.rulePosts.postEveryMsgs}`+
-                               ` messages from "${channel.name}"`);
+                               ` messages from #${channel.name}`);
                 const history =
                     await client.conversations.history({ channel: channel.id,
                                                          limit: config.rulePosts.postEveryMsgs });
@@ -226,7 +227,7 @@ async function postToChannels(config, appUserId, rules)
                 });
         
                 const title = abbrevTitle(message.rule);
-                logger.info(`Posted rule "${title}" to channel "${channel.name}"`);
+                logger.info(`Posted rule "${title}" to #${channel.name}`);
             });
 
             cursor = list.response_metadata.next_cursor;
@@ -245,7 +246,7 @@ async function postToChannels(config, appUserId, rules)
 
     try
     {
-        appUserId = await lookupUserIdByName(config.appName);
+        appUserId = await lookupUserIdByRealName(config.appName);
         if (!appUserId)
         {
             throw `User "${config.appName}" not found`;
@@ -258,17 +259,17 @@ async function postToChannels(config, appUserId, rules)
     }
 
 
-    logger.info(`The app user ID for "${config.appName}" is "${appUserId}"`);
+    logger.info(`The app user ID for "${config.appName}" is ${appUserId}`);
 
     // Poll the qualified channels content and post a rule when there
     // hasn't been one for the specified number of messages
     const channels = Array.isArray(config.rulePosts.channels) ?
-                     config.rulePosts.channels.join(', ') :
-                     config.rulePosts.channels;
-    logger.info(`Checking if rule posts needed on ${channels} channel(s) ` +
+                     config.rulePosts.channels.map(c => '#' + c).join(', ') :
+                     config.rulePosts.channels + ' channels';
+    logger.info(`Checking if rule posts needed in ${channels} ` +
                 `every ${config.rulePosts.checkEverySecs} seconds`);
 
-    setInterval(postToChannels, config.rulePosts.checkEverySecs * 1000, config, appUserId, rules);
+    setInterval(checkChannels, config.rulePosts.checkEverySecs * 1000, config, appUserId, rules);
 })();
 
 // Set up handlers for Slack actions
@@ -343,8 +344,8 @@ app.post('/actions', async (req, res) => {
 
         res.status(200).end();
     
-        logger.info(`Posted ephemeral message containing all rules to "${user}" ` +
-                    `in "${channel}"`);
+        logger.info(`Posted ephemeral message containing all rules to @${user} ` +
+                    `in #${channel}`);
     }
     catch (err)
     {
@@ -411,20 +412,6 @@ app.post('/events', async (req, res) => {
             };
         }
 
-        try
-        {
-            client.chat.postMessage({
-                channel: event.channel,
-                text: message.text,
-                blocks: message.blocks
-            });
-        }
-        catch (err)
-        {
-            logger.error(`Failed to post message in response to "${event.text}"`);
-            return;
-        }
-
         let channelName = event.channel;
         try
         {
@@ -453,8 +440,24 @@ app.post('/events', async (req, res) => {
             // Do nothing - use user ID in log below
         }
 
-        logger.info(`Posted ${message.title} to "${channelName}" in response to ` +
-                    `"${event.text}" from "${userName}"`);
+        const messageInfo = `"${message.title}" to #${channelName} in response to ` +
+                            `"${event.text}" from @${userName}`;
+
+        try
+        {
+            client.chat.postMessage({
+                channel: event.channel,
+                text: message.text,
+                blocks: message.blocks
+            });
+        }
+        catch (err)
+        {
+            logger.error('Failed to post message ' + messageInfo);
+            return;
+        }
+
+        logger.info('Posted' + messageInfo);
     }
     else
     {
@@ -465,15 +468,15 @@ app.post('/events', async (req, res) => {
 });
 
 // An endpoint for administrating (accessed via a slash command)
-const commandHandlers = {
-    'logs': logsUtil.loadLogs
-};
+const commandHandlers = new CommandHandlers();
+commandHandlers.add(new logsUtil.LogsHandler());
+commandHandlers.add(new configUtil.ConfigHandler());
 
 app.post('/admin', async (req, res) => {
     const payload = req.body;
 
-    const commandInfo = `admin command "${payload.text}" from "${payload.user_name}" ` +
-                        `in channel "${payload.channel_name}"`;
+    const commandInfo = `admin command "${payload.text}" from @${payload.user_name} ` +
+                        `in #${payload.channel_name}`;
 
     // Validate requesting user is an admin
     try
@@ -504,16 +507,12 @@ app.post('/admin', async (req, res) => {
     // Lookup corresponding command handler and use to determine reply
     let args = payload.text.split(' ');
 
-    const handler = commandHandlers[args[0]];
+    const handler = commandHandlers.find(args[0]);
     args.shift();
 
     try
     {
-        const message = handler ?
-                        await handler(args) :
-                        'Available commands: ' + Object.keys(commandHandlers)
-                                                       .map(c => '*' + c + '*')
-                                                       .join(', ');
+        const message = handler ? await handler.handle(args) : commandHandlers.usage();
 
         res.status(200)
            .send({ text: message });

@@ -1,4 +1,23 @@
-function validatePresent(value, name, description)
+const CommandHandler = require('./command.js').CommandHandler;
+
+const fs = require('fs');
+const util = require('util');
+
+const writeFile = (fileName, contents) => util.promisify(fs.writeFile)(fileName, contents, 'utf8');
+
+const CONFIG_FILE = './config.json';
+
+const USAGE_ALL = 'config\n' +
+                  '    Displays all config items';
+const USAGE_GET = 'config get <name>\n' +
+                  '    Gets a config item\n' +
+                  '    name - name of the config item';
+const USAGE_SET = 'config set <name> <value>\n' +
+                  '    Sets a config item\n' +
+                  '    name - name of the config item\n' +
+                  '    value - value to assign the config item';
+
+function validatePresent(name, description, value)
 {
     if (!value)
     {
@@ -6,11 +25,11 @@ function validatePresent(value, name, description)
     }
 }
 
-function validateStringArray(value, required, specialValue, name, description)
+function validateStringArray(required, specialValue, name, description, value)
 {
     if (required)
     {
-        validatePresent(value, name, description);
+        validatePresent(name, description, value);
     }
     else if (typeof value === 'undefined')
     {
@@ -38,17 +57,17 @@ function validateStringArray(value, required, specialValue, name, description)
         if (typeof s !== 'string')
         {
             throw '"' + name +
-                  '" should be an array of strings, but encountered non-string value "' + 
+                  '" should be an array of strings, but encountered non-string value "' +
                   s + '"';
         }
     });
 }
 
-function validateInt(value, required, min, max, name, description)
+function validateInt(required, min, max, name, description, value)
 {
     if (required)
     {
-        validatePresent(value, name, description);
+        validatePresent(name, description, value);
     }
     else if (typeof value === 'undefined')
     {
@@ -66,42 +85,163 @@ function validateInt(value, required, min, max, name, description)
     }
 }
 
-function loadConfig(fileName)
+const validations = {
+    'token': validatePresent.bind(null, 'token', 'the Slack OAuth token'),
+    'appName': validatePresent.bind(null, 'appName', 'the Slack app/bot name'),
+    'rulePosts.channels': validateStringArray.bind(null,
+                                                   true,
+                                                   'all',
+                                                   'rulePosts.channels',
+                                                   'the channels in which to post'),
+    'rulePosts.minMembers': validateInt.bind(null,
+                                            true,
+                                            0,
+                                            Infinity,
+                                            'rulePosts.minMembers',
+                                            'the minimum number of members required within a ' +
+                                            'channel in order to post rules'),
+    'rulePosts.checkEverySecs': validateInt.bind(null,
+                                                 true,
+                                                 1, 60 * 60 * 24 * 7 /* one week */,
+                                                 'rulePosts.checkEverySecs',
+                                                 'the frequency at which to check for the need ' +
+                                                 'to post a rule, in seconds'),
+    'rulePosts.postEveryMsgs': validateInt.bind(null,
+                                                true,
+                                                1,
+                                                10000,
+                                                'rulePosts.postEveryMsgs',
+                                                'the number of messages after which to post a ' +
+                                                'rule'),
+    'rulePosts.footers': validateStringArray.bind(null,
+                                                  false,
+                                                  null,
+                                                  'rulePosts.footers',
+                                                  'the footers to select from to add to posted ' +
+                                                  'rules'),
+    'listeningPort': validateInt.bind(null,
+                                      true,
+                                      1,
+                                      65536,
+                                      'listeningPort',
+                                      'the HTTP listening port where requests from Slack are ' +
+                                      'expected')
+};
+
+function validate(cfg, prefix = '')
 {
-    const config = require(fileName);
+    Object.entries(cfg).forEach(([key, value]) => {
+        if (typeof value === 'object')
+        {
+            validate(value, prefix + key + '.');
+            return;
+        }
 
-    validatePresent(config.token, 'token', 'the Slack OAuth token');
-    validatePresent(config.token, 'appName', 'the Slack app/bot name');
-    validateStringArray(config.rulePosts.channels, true, 'all',
-                        'rulePosts.channels',
-                        'the channels in which to post');
-    validateInt(config.rulePosts.minMembers, true, 0, Infinity,
-                'rulePosts.minMembers',
-                'the minimum number of members required within a channel in order to post rules');
-    validateInt(config.rulePosts.checkEverySecs, true, 1, 60 * 60 * 24 * 7 /* one week */,
-                'rulePosts.checkEverySecs',
-                'the frequency at which to check for the need to post a rule, in seconds');
-    validateInt(config.rulePosts.postEveryMsgs, true, 1, 10000,
-                'rulePosts.postEveryMsgs',
-                'the number of messages after which to post a rule');
-    validateStringArray(config.rulePosts.footers, false, null,
-                        'rulePosts.footers',
-                        'the footers to select from to add to posted rules');
-    validateInt(config.listeningPort, true, 1, 65536,
-                'listeningPort',
-                'the HTTP listening port where requests from Slack are expected');
+        const validation = validations[prefix + key];
+        if (validation)
+        {
+            validation(value);
+        }
+    });
+}
 
+const config = require(CONFIG_FILE);
+validate(config);
+
+function getConfig()
+{
     return config;
 }
 
 function pickRandomFooter(config)
 {
     const footers = config.rulePosts.footers;
-    
+
     if (!footers) return '';
 
     return footers[Math.floor(Math.random() * footers.length)];
 }
 
-module.exports.loadConfig = loadConfig;
+class ConfigHandler extends CommandHandler
+{
+    constructor()
+    {
+        super('config', USAGE_ALL + '\n' + USAGE_GET + '\n' + USAGE_SET);
+    }
+
+    async handle(args)
+    {
+        if (args.length === 0)
+        {
+            const print = (cfg, prefix = '') => {
+                return Object.entries(cfg).reduce((prev, cur) => {
+                    const printItem = (item) => {
+                        const [key, value] = item;
+
+                        if (typeof value === 'object' && !Array.isArray(value))
+                        {
+                            return print(value, prefix + key + '.');
+                        }
+
+                        return item = prefix + key + ': ' +
+                               (Array.isArray(value) ? value.join('; ') : value) + '\n';
+                    };
+
+                        return (Array.isArray(prev) ? printItem(prev) : prev) + printItem(cur);
+                    });
+              };
+
+            return print(config);
+        }
+
+        const cmd = args.shift();
+        if (cmd !== 'get' && cmd !== 'set') return `Invalid config sub-command: ${cmd}`;
+
+        if (cmd === 'get')
+        {
+            if (args.length !== 1) return USAGE_GET;
+        }
+
+        const name = args.shift();
+        const badNameMessage = `Invalid config item specified: ${name}\n\n` +
+                               (cmd === 'get' ? USAGE_GET : USAGE_SET);
+
+        let cfg = config;
+        const parts = name.split('.');
+        let last = parts.pop();
+
+        for (var i = 0; i < parts.length; ++i)
+        {
+            cfg = cfg[parts[i]];
+            if (!cfg || typeof cfg !== 'object')
+            {
+                return badNameMessage;
+            }
+        }
+
+        if (!cfg[last] || (typeof cfg[last] === 'object' && !Array.isArray(cfg[last])))
+        {
+            return badNameMessage;
+        }
+
+        if (cmd === 'get')
+        {
+            const value = cfg[last];
+            return Array.isArray(value) ? value.join('; ') : value;
+        }
+        else if (cmd === 'set')
+        {
+            const value = args.join(' ');
+            cfg[last] = Array.isArray(cfg[last]) ? value.split('; ') : value;
+
+            await writeFile(CONFIG_FILE, JSON.stringify(config, null, 4));
+
+            return `Set ${name} to ${value}`;
+        }
+    }
+}
+
+module.exports.CONFIG_FILE = CONFIG_FILE;
+module.exports.getConfig = getConfig;
 module.exports.pickRandomFooter = pickRandomFooter;
+module.exports.ConfigHandler = ConfigHandler;
