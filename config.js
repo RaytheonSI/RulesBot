@@ -164,6 +164,13 @@ function pickRandomFooter(config)
     return footers[Math.floor(Math.random() * footers.length)];
 }
 
+const changeListeners = {};
+
+function registerChangeListener(name, listener)
+{
+    changeListeners[name] = listener;
+}
+
 function configValueToString(value)
 {
     return Array.isArray(value) ? '[ ' + value.join(STRING_ARRAY_DELIMITER) + ' ]' : value;
@@ -281,12 +288,23 @@ class ConfigHandler extends CommandHandler
                 cfg = cfg[parts[i]];
             }
 
+            const lastValue = cfg[last];
             cfg[last] = value;
 
             await writeFile(CONFIG_FILE, JSON.stringify(config, null, 4));
 
+            if (value != lastValue)
+            {
+                const listener = changeListeners[name];
+                if (listener)
+                {
+                    listener(value);
+                }
+            }
+
             value = configValueToString(value);
             return `Set ${name} to ${value}`;
+
         }
 
         return `Invalid config sub-command: ${cmd}`
@@ -296,4 +314,5 @@ class ConfigHandler extends CommandHandler
 module.exports.CONFIG_FILE = CONFIG_FILE;
 module.exports.getConfig = getConfig;
 module.exports.pickRandomFooter = pickRandomFooter;
+module.exports.registerChangeListener = registerChangeListener;
 module.exports.ConfigHandler = ConfigHandler;

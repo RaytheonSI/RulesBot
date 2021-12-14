@@ -102,18 +102,7 @@ headerBlock.text.text += '*' + rules.title + '*';
 
 const client = new slackWebApi.WebClient(config.token);
 
-async function lookupUserIdByRealName(name)
-{
-    // While the user list is supposed to be paginated,
-    // in practice all users are returned
-    const list = await client.users.list();
-    logger.debug('Users: %O', list.members.map((user) => {
-        return { id: user.id, name: user.name, real_name: user.real_name };
-    }));
-    const user = list.members.find(user => user.real_name === name);
-
-    return user ? user.id : user;
-}
+configUtil.registerChangeListener('token', (token) => { client.token = token; });
 
 async function lookupUserById(id)
 {
@@ -163,9 +152,47 @@ function abbrevTitle(rule)
            rule.title.substring(0, LOG_TITLE_LENGTH) + '...';
 }
 
-async function checkChannels(config, appUserId, rules)
+let appUserId = null;
+
+async function lookupAppUserId(name)
+{
+    try
+    {
+        // While the user list is supposed to be paginated,
+        // in practice all users are returned
+        const list = await client.users.list();
+        logger.debug('Users: %O', list.members.map((user) => {
+            return { id: user.id, name: user.name, real_name: user.real_name };
+        }));
+        const user = list.members.find(user => user.real_name === name);
+        if (!user)
+        {
+            console.error(`User ID for "${name}" not found`);
+
+            appUserId = null;
+            return;
+        }
+
+        appUserId = user.id;
+
+        logger.info(`The app user ID for "${name}" is ${appUserId}`);
+    }
+    catch (err)
+    {
+        logger.error('Could not lookup user ID for app: %O', err);
+    }
+}
+
+
+async function checkChannels(config, rules)
 {
     logger.verbose('Checking if rule posts needed');
+
+    if (!appUserId)
+    {
+        logger.debug('Failed to check channels because the app user ID is not valid');
+        return;
+    }
 
     try
     {
@@ -238,38 +265,23 @@ async function checkChannels(config, appUserId, rules)
     }
 }
 
-(async () => {
-    // Look up the user ID of the bot so we can determine how many
-    // messages ago it posted to each qualified channel
-    let appUserId = null;
+// Look up the user ID of the bot so we can determine how many
+// messages ago it posted to each qualified channel
+lookupAppUserId(config.appName);
 
-    try
-    {
-        appUserId = await lookupUserIdByRealName(config.appName);
-        if (!appUserId)
-        {
-            throw `User "${config.appName}" not found`;
-        }
-    }
-    catch (err)
-    {
-        logger.error('Could not lookup user ID for app: %O', err);
-        process.exit(1);
-    }
+configUtil.registerChangeListener('appName', async (appName) => {
+    lookupAppUserId(appName);
+});
 
+// Poll the qualified channels content and post a rule when there
+// hasn't been one for the specified number of messages
+const channels = Array.isArray(config.rulePosts.channels) ?
+                 config.rulePosts.channels.map(c => '#' + c).join(', ') :
+                 config.rulePosts.channels + ' channels';
+logger.info(`Checking if rule posts needed in ${channels} ` +
+            `every ${config.rulePosts.checkEverySecs} seconds`);
 
-    logger.info(`The app user ID for "${config.appName}" is ${appUserId}`);
-
-    // Poll the qualified channels content and post a rule when there
-    // hasn't been one for the specified number of messages
-    const channels = Array.isArray(config.rulePosts.channels) ?
-                     config.rulePosts.channels.map(c => '#' + c).join(', ') :
-                     config.rulePosts.channels + ' channels';
-    logger.info(`Checking if rule posts needed in ${channels} ` +
-                `every ${config.rulePosts.checkEverySecs} seconds`);
-
-    setInterval(checkChannels, config.rulePosts.checkEverySecs * 1000, config, appUserId, rules);
-})();
+setInterval(checkChannels, config.rulePosts.checkEverySecs * 1000, config, rules);
 
 // Set up handlers for Slack actions
 const app = express();
@@ -439,7 +451,7 @@ app.post('/events', async (req, res) => {
             // Do nothing - use user ID in log below
         }
 
-        const messageInfo = `"${message.title}" to #${channelName} in response to ` +
+        const messageInfo = `${message.title} to #${channelName} in response to ` +
                             `"${event.text}" from @${userName}`;
 
         try
@@ -456,7 +468,7 @@ app.post('/events', async (req, res) => {
             return;
         }
 
-        logger.info('Posted' + messageInfo);
+        logger.info('Posted ' + messageInfo);
     }
     else
     {
