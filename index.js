@@ -1,6 +1,8 @@
-const rulesUtil = require('./rules.js');
+const commandUtil = require('./command.js');
+const CommandHandler = commandUtil.CommandHandler;
+const CommandHandlers = commandUtil.CommandHandlers;
 const logsUtil = require('./logs.js');
-const CommandHandlers = require('./command.js').CommandHandlers;
+const rulesUtil = require('./rules.js');
 
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -116,6 +118,24 @@ async function lookupChannelById(id)
     const info = await client.conversations.info({ channel: id });
     logger.debug('Channel info: %O', info);
     return info.ok ? info.channel : null;
+}
+
+async function lookupChannelByName(name)
+{
+    let cursor = '';
+
+    do
+    {
+        const list = await client.conversations.list();
+        if (!list.ok) return null;
+
+        const channel = list.channels.find(c => c.name === name);
+        if (channel) return channel;
+
+        cursor = list.response_metadata.next_cursor;
+    } while (cursor);
+
+    return null;
 }
 
 function constructRandomRuleMessage()
@@ -478,10 +498,89 @@ app.post('/events', async (req, res) => {
     }
 });
 
+// Command handler for posting rule messages
+const USAGE = 'post rule <channel>\n' +
+              '    Posts a randomly selected rule to a channel\n' +
+              '    channel - the channel to post the rule to\n' +
+              'post rules <channel>\n' +
+              '    Posts all rules to a channel\n' +
+              '    channel - the channel to post the rules to';
+
+class PostHandler extends CommandHandler
+{
+    constructor()
+    {
+        super('post', USAGE);
+    }
+
+    async handle(args)
+    {
+        // Validate arguments
+        const type = args.shift();
+        const channelName = args.shift();
+
+        if (!type || !channelName || args.length !== 0 || (type !== 'rule' && type !== 'rules'))
+        {
+            return USAGE;
+        }
+
+        // Create message
+        let message = null;
+
+        if (type === 'rule')
+        {
+            const ruleMessage = constructRandomRuleMessage();
+            const title = abbrevTitle(ruleMessage.rule);
+
+            message = {
+                title: `rule "${title}"`,
+                text: ruleMessage.text,
+                blocks: ruleMessage.blocks
+            };
+        }
+        else if (type === 'rules')
+        {
+            message = {
+                title: 'rules',
+                text: rulesUtil.formatRule(rules)
+            };
+        }
+
+        // Lookup the channel
+        const channel = await lookupChannelByName(channelName);
+        if (!channel)
+        {
+            return `${channelName} is not a valid channel`;
+        }
+
+        // Join the bot to the channel if not a member
+        if (!channel.is_member)
+        {
+            logger.info(`Joining #${channel.name}`);
+            const join = await client.conversations.join({ channel: channel.id });
+            if (!join.ok)
+            {
+                logger.warn(`Failed to join #${channel.name}: ${join.error}`);
+                return;
+            }
+        }
+
+        // Post the message
+        client.chat.postMessage({
+            channel: channel.id,
+            text: message.text,
+            blocks: message.blocks
+        });
+
+        return `Posted ${message.title} to #${channelName}`;
+    }
+}
+
 // An endpoint for administrating (accessed via a slash command)
 const commandHandlers = new CommandHandlers();
 commandHandlers.add(new logsUtil.LogsHandler());
 commandHandlers.add(new configUtil.ConfigHandler());
+commandHandlers.add(new PostHandler());
 
 app.post('/admin', async (req, res) => {
     const payload = req.body;
