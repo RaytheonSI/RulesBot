@@ -1,14 +1,3 @@
-let configUtit = null;
-try
-{
-    configUtil = require('./config.js');
-}
-catch (err)
-{
-    logger.error(`Failed to load ${configUtil.CONFIG_FILE}: %O`, err);
-    process.exit(1);
-}
-
 const rulesUtil = require('./rules.js');
 const logsUtil = require('./logs.js');
 const CommandHandlers = require('./command.js').CommandHandlers;
@@ -81,6 +70,16 @@ const logger = winston.createLogger({
     ]
 });
 
+let configUtil = null;
+try
+{
+    configUtil = require('./config.js');
+}
+catch (err)
+{
+    logger.error(`Failed to load config.json: %O`, err);
+    process.exit(1);
+}
 const config = configUtil.getConfig();
 
 let rules = null;
@@ -161,7 +160,7 @@ function abbrevTitle(rule)
 
     return rule.title.length <= LOG_TITLE_LENGTH ?
            rule.title :
-           rule.title.substr(0, LOG_TITLE_LENGTH) + '...';
+           rule.title.substring(0, LOG_TITLE_LENGTH) + '...';
 }
 
 async function checkChannels(config, appUserId, rules)
@@ -184,14 +183,14 @@ async function checkChannels(config, appUserId, rules)
                     logger.verbose(`Skipping unmatched channel #${channel.name}`);
                     return;
                 }
-        
+
                 if (channel.num_members < config.rulePosts.minMembers)
                 {
                     logger.verbose(`Skipping channel #${channel.name} with only ` +
                                    `${channel.num_members} members`);
                     return;
                 }
-        
+
                 // Join the bot to the channel if not a member
                 if (!channel.is_member)
                 {
@@ -203,7 +202,7 @@ async function checkChannels(config, appUserId, rules)
                         return;
                     }
                 }
-        
+
                 // Look up enough message history to deter if the bot needs to post again
                 logger.verbose(`Loading last ${config.rulePosts.postEveryMsgs}`+
                                ` messages from #${channel.name}`);
@@ -216,16 +215,16 @@ async function checkChannels(config, appUserId, rules)
                     logger.verbose('Found qualified rule message in history');
                     return;
                 }
-        
+
                 // Select a random rule and post to the channel
                 const message = constructRandomRuleMessage();
-        
+
                 client.chat.postMessage({
                     channel: channel.id,
                     text: message.text,
                     blocks: message.blocks
                 });
-        
+
                 const title = abbrevTitle(message.rule);
                 logger.info(`Posted rule "${title}" to #${channel.name}`);
             });
@@ -240,7 +239,7 @@ async function checkChannels(config, appUserId, rules)
 }
 
 (async () => {
-    // Look up the user ID of the bot so we can determine how many 
+    // Look up the user ID of the bot so we can determine how many
     // messages ago it posted to each qualified channel
     let appUserId = null;
 
@@ -343,7 +342,7 @@ app.post('/actions', async (req, res) => {
         }
 
         res.status(200).end();
-    
+
         logger.info(`Posted ephemeral message containing all rules to @${user} ` +
                     `in #${channel}`);
     }

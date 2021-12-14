@@ -15,7 +15,11 @@ const USAGE_GET = 'config get <name>\n' +
 const USAGE_SET = 'config set <name> <value>\n' +
                   '    Sets a config item\n' +
                   '    name - name of the config item\n' +
-                  '    value - value to assign the config item';
+                  '    value - value to assign the config item; ' +
+                  'arrays should be specified in the form: [ item1; item2 ]';
+
+const NAME_DELIMITER = '.';
+const STRING_ARRAY_DELIMITER = '; ';
 
 function validatePresent(name, description, value)
 {
@@ -128,20 +132,18 @@ const validations = {
                                       'expected')
 };
 
-function validate(cfg, prefix = '')
+function validate(config)
 {
-    Object.entries(cfg).forEach(([key, value]) => {
-        if (typeof value === 'object')
+    Object.entries(validations).forEach(([name, validate]) => {
+        const parts = name.split(NAME_DELIMITER);
+        let cfg = config;
+        for (var i = 0; i < parts.length; ++i)
         {
-            validate(value, prefix + key + '.');
-            return;
+            cfg = cfg[parts[i]];
+            if (!cfg) break;
         }
 
-        const validation = validations[prefix + key];
-        if (validation)
-        {
-            validation(value);
-        }
+        validate(cfg);
     });
 }
 
@@ -162,6 +164,27 @@ function pickRandomFooter(config)
     return footers[Math.floor(Math.random() * footers.length)];
 }
 
+function configValueToString(value)
+{
+    return Array.isArray(value) ? '[ ' + value.join(STRING_ARRAY_DELIMITER) + ' ]' : value;
+}
+
+function parseStringArray(value)
+{
+    return value.startsWith('[') && value.endsWith(']') ?
+           value.slice(1, -1).split(';').map(v => v.trim()) :
+           value;
+}
+
+const parsers = {
+    'rulePosts.channels': parseStringArray,
+    'rulePosts.minMembers': parseInt,
+    'rulePosts.checkEverySecs': parseInt,
+    'rulePosts.postEveryMsgs': parseInt,
+    'rulePosts.footers': parseStringArray,
+    'listeningPort': parseInt
+};
+
 class ConfigHandler extends CommandHandler
 {
     constructor()
@@ -180,11 +203,10 @@ class ConfigHandler extends CommandHandler
 
                         if (typeof value === 'object' && !Array.isArray(value))
                         {
-                            return print(value, prefix + key + '.');
+                            return print(value, prefix + key + NAME_DELIMITER);
                         }
 
-                        return item = prefix + key + ': ' +
-                               (Array.isArray(value) ? value.join('; ') : value) + '\n';
+                        return item = prefix + key + ': ' + configValueToString(value) + '\n';
                     };
 
                         return (Array.isArray(prev) ? printItem(prev) : prev) + printItem(cur);
@@ -195,49 +217,79 @@ class ConfigHandler extends CommandHandler
         }
 
         const cmd = args.shift();
-        if (cmd !== 'get' && cmd !== 'set') return `Invalid config sub-command: ${cmd}`;
-
-        if (cmd === 'get')
-        {
-            if (args.length !== 1) return USAGE_GET;
-        }
-
         const name = args.shift();
-        const badNameMessage = `Invalid config item specified: ${name}\n\n` +
+        const badNameMessage = `Invalid config name specified: ${name}\n\n` +
                                (cmd === 'get' ? USAGE_GET : USAGE_SET);
 
-        let cfg = config;
-        const parts = name.split('.');
-        let last = parts.pop();
-
-        for (var i = 0; i < parts.length; ++i)
-        {
-            cfg = cfg[parts[i]];
-            if (!cfg || typeof cfg !== 'object')
-            {
-                return badNameMessage;
-            }
-        }
-
-        if (!cfg[last] || (typeof cfg[last] === 'object' && !Array.isArray(cfg[last])))
-        {
-            return badNameMessage;
-        }
-
         if (cmd === 'get')
         {
-            const value = cfg[last];
-            return Array.isArray(value) ? value.join('; ') : value;
+            if (!name) return USAGE_GET;
+
+            const parts = name.split(NAME_DELIMITER);
+            let cfg = config;
+            for (var i = 0; i < parts.length; ++i)
+            {
+                cfg = cfg[parts[i]];
+
+                const last = i === parts.length - 1;
+                const obj = typeof cfg === 'object';
+                if (!cfg || (!last && !obj) || (last && obj && !Array.isArray(cfg)))
+                {
+                    return badNameMessage;
+                }
+            }
+
+            const value = configValueToString(cfg);
+            return `${name} is ${value}`;
         }
         else if (cmd === 'set')
         {
-            const value = args.join(' ');
-            cfg[last] = Array.isArray(cfg[last]) ? value.split('; ') : value;
+            if (!name || args.length === 0) return USAGE_SET;
+
+            const validate = validations[name];
+            if (!validate) return badNameMessage;
+
+            let value = args.join(' ');
+
+            const parser = parsers[name];
+            if (parser)
+            {
+                value = parser(value);
+            }
+
+            try
+            {
+                validate(value);
+            }
+            catch (err)
+            {
+                return err;
+            }
+
+            const parts = name.split(NAME_DELIMITER);
+            const last = parts.pop();
+            let cfg = config;
+            for (var i = 0; i < parts.length; ++i)
+            {
+                const next = cfg[parts[i]];
+
+                if (!next)
+                {
+                    cfg[parts[i]] = {};
+                }
+
+                cfg = cfg[parts[i]];
+            }
+
+            cfg[last] = value;
 
             await writeFile(CONFIG_FILE, JSON.stringify(config, null, 4));
 
+            value = configValueToString(value);
             return `Set ${name} to ${value}`;
         }
+
+        return `Invalid config sub-command: ${cmd}`
     }
 }
 
