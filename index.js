@@ -203,8 +203,11 @@ async function lookupAppUserId(name)
     }
 }
 
+configUtil.registerChangeListener('appName', async (appName) => {
+    lookupAppUserId(appName);
+});
 
-async function checkChannels(config, rules)
+async function checkChannels()
 {
     logger.verbose('Checking if rule posts needed');
 
@@ -285,23 +288,28 @@ async function checkChannels(config, rules)
     }
 }
 
-// Look up the user ID of the bot so we can determine how many
-// messages ago it posted to each qualified channel
-lookupAppUserId(config.appName);
+async function checkChannelsAtInterval()
+{
+    await checkChannels();
 
-configUtil.registerChangeListener('appName', async (appName) => {
-    lookupAppUserId(appName);
-});
+    setTimeout(checkChannelsAtInterval, config.rulePosts.checkEverySecs * 1000);
+}
 
-// Poll the qualified channels content and post a rule when there
-// hasn't been one for the specified number of messages
-const channels = Array.isArray(config.rulePosts.channels) ?
-                 config.rulePosts.channels.map(c => '#' + c).join(', ') :
-                 config.rulePosts.channels + ' channels';
-logger.info(`Checking if rule posts needed in ${channels} ` +
-            `every ${config.rulePosts.checkEverySecs} seconds`);
+(async () => {
+    // Look up the user ID of the bot so we can determine how many
+    // messages ago it posted to each qualified channel
+    await lookupAppUserId(config.appName);
 
-setInterval(checkChannels, config.rulePosts.checkEverySecs * 1000, config, rules);
+    // Poll the qualified channels content and post a rule when there
+    // hasn't been one for the specified number of messages
+    const channels = Array.isArray(config.rulePosts.channels) ?
+                    config.rulePosts.channels.map(c => '#' + c).join(', ') :
+                    config.rulePosts.channels + ' channels';
+    logger.info(`Checking if rule posts needed in ${channels} ` +
+                `every ${config.rulePosts.checkEverySecs} seconds`);
+
+    checkChannelsAtInterval();
+})();
 
 // Set up handlers for Slack actions
 const app = express();
