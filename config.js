@@ -8,12 +8,12 @@ const writeFile = (fileName, contents) => util.promisify(fs.writeFile)(fileName,
 const CONFIG_FILE = './config.json';
 
 const USAGE_ALL = 'config\n' +
-                  '    Displays all config items';
+                  '    Display all config items';
 const USAGE_GET = 'config get <name>\n' +
-                  '    Gets a config item\n' +
+                  '    Get a config item\n' +
                   '    name - name of the config item';
 const USAGE_SET = 'config set <name> <value>\n' +
-                  '    Sets a config item\n' +
+                  '    Set a config item\n' +
                   '    name - name of the config item\n' +
                   '    value - value to assign the config item; ' +
                   'arrays should be specified in the form: [ item1; item2 ]';

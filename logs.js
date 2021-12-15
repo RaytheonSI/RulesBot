@@ -7,7 +7,7 @@ const readFile = (fileName) => util.promisify(fs.readFile)(fileName, 'utf8');
 
 const LOG_FILE_NAME = './rulesbot.log';
 const USAGE = 'logs [count]\n' +
-              '    Displays the most recent logs\n' +
+              '    Display the most recent logs\n' +
               '    count (optional) - a positive integer of the number of logs to display';
 const DEFAULT_LOG_COUNT = 10;
 

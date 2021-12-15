@@ -2,7 +2,9 @@
 
 A Slack bot which reminds users about rules.
 
-When installed to a workspace the bot periodically checks the specified channels and posts an excerpt from the rules when enough other messages have been posted as configured. The posts also include a button to request the full set of rules (in a message to the requesting user only). The bot also responds with rules to direct communication from users.
+When installed to a workspace the bot periodically checks the specified channels and posts an excerpt from the rules when enough other messages have been posted as configured. The posts also include a button to request the full set of rules (in a message to the requesting user only). The bot also responds with rules to direct communication from users. A slash command is provided to
+allow workspace administrators to interactively view logs, change configuration, change rules, and
+post rules to any channel.
 
 ## Slack Configuration
 
@@ -119,4 +121,34 @@ Stop a running instance by issuing the following command:
 
 ```bash
 ./rulesbot.sh stop
+```
+
+## Administrating
+
+`/rulesbot` command usage:
+
+```text
+logs [count]
+   Display the most recent logs
+   count (optional) - a positive integer of the number of logs to display
+
+config
+   Display all config items
+config get <name>
+   Get a config item
+   name - name of the config item
+config set <name> <value>
+   Set a config item
+   name - name of the config item
+   value - value to assign the config item; arrays should be specified in the form: [ item1; item2 ]
+
+rules
+   Update rules
+
+post rule <channel>
+   Post a randomly selected rule to a channel
+   channel - the channel to post the rule to
+post rules <channel>
+   Post all rules to a channel
+   channel - the channel to post the rules to
 ```

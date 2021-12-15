@@ -1,9 +1,19 @@
+const CommandHandler = require('./command.js').CommandHandler;
+
 const fs = require('fs');
+const util = require('util');
+
+const writeFile = (fileName, contents) => util.promisify(fs.writeFile)(fileName, contents, 'utf8');
+
+const RULES_FILE = './rules.txt';
+
+const USAGE = 'rules\n' +
+              '    Update rules';
 
 function getIndent(content)
 {
     let indent = 0;
-    
+
     while (indent < content.length && content[indent] == ' ')
     {
         ++indent;
@@ -31,7 +41,7 @@ function parseRule(lines, indent)
     //     { title: '<Rule 1 title>' },
     //     {
     //       title: '<Rule 2 title>',
-    //       rules: 
+    //       rules:
     //       [
     //          { title: '<Rule a title>' },
     //          { title: '<Rule b title>' }
@@ -44,7 +54,7 @@ function parseRule(lines, indent)
     const rule = { title: lines.shift().trim() };
 
     const rules = [];
-        
+
     while (true)
     {
         const nextIndent = lines.length > 0 ? getIndent(lines[0]) : 0;
@@ -64,13 +74,26 @@ function parseRule(lines, indent)
     return rule;
 }
 
-function loadRules(fileName)
+function parseRules(input)
 {
-    const rulesText = fs.readFileSync(fileName, 'utf8');
-    if (rulesText === null) return null;
+    return parseRule(input.split('\n').filter(line => line.trim() !== ''), 0);
+}
 
-    const lines = rulesText.split('\n').filter(line => line.trim() != '');
-    return parseRule(lines, 0);
+const contents = fs.readFileSync(RULES_FILE, 'utf8');
+if (!contents)
+{
+    throw 'file reading error';
+}
+
+let rules = parseRules(contents);
+if (!rules)
+{
+    throw 'at least one inital rule must be specified';
+}
+
+function getRules()
+{
+    return rules;
 }
 
 function pickRandomRule(rule)
@@ -97,7 +120,7 @@ function formatRule(rule, indent = 0)
 
         rule.rules.forEach((r, index, array) => {
             output += formatRule(r, indent + 2);
-            
+
             if (!section && index < array.length - 1)
             {
                 output += '\n';
@@ -108,6 +131,83 @@ function formatRule(rule, indent = 0)
     return output;
 }
 
-module.exports.loadRules = loadRules;
+const RULES_BLOCK = 'rules-block';
+const RULES_ELEMENT = 'rules-element';
+
+class RulesHandler extends CommandHandler
+{
+    constructor(client)
+    {
+        super('rules', USAGE);
+
+        this.client = client;
+    }
+
+    async handle(args, triggerId)
+    {
+        if (args.length !== 0) return USAGE;
+
+        this.client.views.open({
+            trigger_id: triggerId,
+            view: {
+                type: 'modal',
+                title: {
+                    type: 'plain_text',
+                    text: 'Update rules'
+                },
+                submit: {
+                    type: 'plain_text',
+                    text: 'Update'
+                },
+                blocks: [
+                    {
+                        type: 'input',
+                        block_id: RULES_BLOCK,
+                        element: {
+                            type: 'plain_text_input',
+                            action_id: RULES_ELEMENT,
+                            placeholder: {
+                                type: 'plain_text',
+                                text: 'Root rule\n  Rule 1\n  Rule 2\n    Rule a\n    Rule b'
+                            },
+                            initial_value: rules ? formatRule(rules) : '',
+                            multiline: true,
+                            min_length: 1
+                        },
+                        label: {
+                            type: 'plain_text',
+                            text: 'Rules'
+                        }
+                    }
+                ]
+            }
+        })
+
+        return 'Opening dialog to edit rules...';
+    }
+
+    async update(values)
+    {
+        const value = values[RULES_BLOCK][RULES_ELEMENT].value;
+        if (!value)
+        {
+            throw 'Expected rules value missing';
+        }
+
+        const newRules = parseRules(value);
+        if (!newRules)
+        {
+            throw 'At least one rule is required';
+        }
+
+        await writeFile(RULES_FILE, value);
+
+        rules = newRules;
+    }
+}
+
+module.exports.RULES_FILE = RULES_FILE;
+module.exports.getRules = getRules;
 module.exports.pickRandomRule = pickRandomRule;
 module.exports.formatRule = formatRule;
+module.exports.RulesHandler = RulesHandler;

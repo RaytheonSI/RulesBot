@@ -2,7 +2,6 @@ const commandUtil = require('./command.js');
 const CommandHandler = commandUtil.CommandHandler;
 const CommandHandlers = commandUtil.CommandHandlers;
 const logsUtil = require('./logs.js');
-const rulesUtil = require('./rules.js');
 
 const axios = require('axios');
 const bodyParser = require('body-parser');
@@ -82,25 +81,19 @@ catch (err)
     logger.error(`Failed to load config.json: %O`, err);
     process.exit(1);
 }
+
 const config = configUtil.getConfig();
 
-let rules = null;
-
+let rulesUtil = null;
 try
 {
-    rules = rulesUtil.loadRules('./rules.txt');
-    if (!rules)
-    {
-        throw 'At least one rule must be specified';
-    }
+    rulesUtil = require('./rules.js');
 }
 catch (err)
 {
     logger.error('Failed to load rules.txt: %O', err);
     process.exit(1);
 }
-
-headerBlock.text.text += '*' + rules.title + '*';
 
 const client = new slackWebApi.WebClient(config.token);
 
@@ -142,6 +135,9 @@ function constructRandomRuleMessage()
 {
     const blocks = [];
 
+    const rules = rulesUtil.getRules();
+
+    headerBlock.text.text += '*' + rules.title + '*';
     blocks.push(headerBlock);
 
     const rule = rulesUtil.pickRandomRule(rules);
@@ -323,6 +319,8 @@ app.get('/', (req, res) => {
 });
 
 // An endpoint to handle actions (e.g. when buttons on posts are clicked)
+const rulesHandler = new rulesUtil.RulesHandler(client);
+
 app.post('/actions', async (req, res) => {
     let responseUrl = '';
     let user = '';
@@ -331,6 +329,16 @@ app.post('/actions', async (req, res) => {
     try
     {
         const payload = JSON.parse(req.body.payload);
+
+        if (payload.type === 'view_submission')
+        {
+            rulesHandler.update(payload.view.state.values);
+
+            res.status(200).end();
+
+            logger.info(`Updated rules submitted by @${payload.user.name}`);
+            return;
+        }
 
         if (payload.type !== 'block_actions')
         {
@@ -372,7 +380,7 @@ app.post('/actions', async (req, res) => {
     {
         const response = await axios.post(responseUrl,
                                           {
-                                              text: rulesUtil.formatRule(rules),
+                                              text: rulesUtil.formatRule(rulesUtil.getRules()),
                                               replace_original: false,
                                               response_type: 'ephemeral'
                                           });
@@ -428,7 +436,7 @@ app.post('/events', async (req, res) => {
         {
             message = {
                 title: 'rules',
-                text: rulesUtil.formatRule(rules)
+                text: rulesUtil.formatRule(rulesUtil.getRules())
             };
         }
         else if (event.text.includes('rule'))
@@ -508,10 +516,10 @@ app.post('/events', async (req, res) => {
 
 // Command handler for posting rule messages
 const USAGE = 'post rule <channel>\n' +
-              '    Posts a randomly selected rule to a channel\n' +
+              '    Post a randomly selected rule to a channel\n' +
               '    channel - the channel to post the rule to\n' +
               'post rules <channel>\n' +
-              '    Posts all rules to a channel\n' +
+              '    Post all rules to a channel\n' +
               '    channel - the channel to post the rules to';
 
 class PostHandler extends CommandHandler
@@ -550,7 +558,7 @@ class PostHandler extends CommandHandler
         {
             message = {
                 title: 'rules',
-                text: rulesUtil.formatRule(rules)
+                text: rulesUtil.formatRule(rulesUtil.getRules())
             };
         }
 
@@ -588,6 +596,7 @@ class PostHandler extends CommandHandler
 const commandHandlers = new CommandHandlers();
 commandHandlers.add(new logsUtil.LogsHandler());
 commandHandlers.add(new configUtil.ConfigHandler());
+commandHandlers.add(rulesHandler);
 commandHandlers.add(new PostHandler());
 
 app.post('/admin', async (req, res) => {
@@ -630,7 +639,9 @@ app.post('/admin', async (req, res) => {
 
     try
     {
-        const message = handler ? await handler.handle(args) : commandHandlers.usage();
+        const message = handler ?
+                        await handler.handle(args, payload.trigger_id) :
+                        commandHandlers.usage();
 
         res.status(200)
            .send({ text: message });
