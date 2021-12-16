@@ -1,11 +1,12 @@
-const CommandHandler = require('./command.js').CommandHandler;
-
 const fs = require('fs');
+const path = require('path');
 const util = require('util');
+
+const CommandHandler = require('./command.js').CommandHandler;
 
 const writeFile = (fileName, contents) => util.promisify(fs.writeFile)(fileName, contents, 'utf8');
 
-const CONFIG_FILE = './config.json';
+const CONFIG_FILE = path.join(__dirname, 'config.json');
 
 const USAGE_ALL = 'config\n' +
                   '    Display all config items';

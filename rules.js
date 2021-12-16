@@ -1,11 +1,12 @@
-const CommandHandler = require('./command.js').CommandHandler;
-
 const fs = require('fs');
+const path = require('path');
 const util = require('util');
+
+const CommandHandler = require('./command.js').CommandHandler;
 
 const writeFile = (fileName, contents) => util.promisify(fs.writeFile)(fileName, contents, 'utf8');
 
-const RULES_FILE = './rules.txt';
+const RULES_FILE = path.join(__dirname, 'rules.txt');
 
 const USAGE = 'rules\n' +
               '    Update rules';

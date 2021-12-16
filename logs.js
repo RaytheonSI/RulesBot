@@ -1,11 +1,12 @@
-const CommandHandler = require('./command.js').CommandHandler;
-
 const fs = require('fs');
+const path = require('path');
 const util = require('util');
+
+const CommandHandler = require('./command.js').CommandHandler;
 
 const readFile = (fileName) => util.promisify(fs.readFile)(fileName, 'utf8');
 
-const LOG_FILE_NAME = './rulesbot.log';
+const LOG_FILE = path.join(__dirname, 'rulesbot.log');
 const USAGE = 'logs [count]\n' +
               '    Display the most recent logs\n' +
               '    count (optional) - a positive integer of the number of logs to display';
@@ -33,7 +34,7 @@ class LogsHandler extends CommandHandler
             }
         }
 
-        const logs = await readFile(LOG_FILE_NAME);
+        const logs = await readFile(LOG_FILE);
 
         return logs.split('\n')
                    .filter(line => line !== '')

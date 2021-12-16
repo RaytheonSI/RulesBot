@@ -13,9 +13,11 @@ if [[ $# < 1 ]]; then
     exit 0
 fi
 
+dir=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
 command=$1
 
-pidfile="rulesbot.pid"
+pidfile="$dir/rulesbot.pid"
 
 if [[ $command == "start" ]]; then
     if [[ -e $pidfile ]]; then
@@ -37,15 +39,15 @@ if [[ $command == "start" ]]; then
         exit 1
     fi
 
-    if [[ ! -e ./node_modules ]]; then
+    if [[ ! -e $dir/node_modules ]]; then
         echo "Dependencies not detected; run 'npm install' to download modules"
         exit 1
     fi
 
-    logfile="rulesbot.log"
+    logfile="$dir/rulesbot.log"
 
-    nohup node index.js >> $logfile 2>&1 &
-    
+    nohup node $dir/index.js >> $logfile 2>&1 &
+
     pid=$!
     echo $pid > $pidfile
 
@@ -58,8 +60,8 @@ elif [[ $command = "stop" ]]; then
     fi
 
     pid=$(<$pidfile)
-    
-    kill $pid
+
+    kill $pid > /dev/null 2>&1
     if [[ $? == 0 ]]; then
         echo "Killed instance (pid: $pid)"
     else

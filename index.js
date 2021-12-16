@@ -1,8 +1,3 @@
-const commandUtil = require('./command.js');
-const CommandHandler = commandUtil.CommandHandler;
-const CommandHandlers = commandUtil.CommandHandlers;
-const logsUtil = require('./logs.js');
-
 const axios = require('axios');
 const bodyParser = require('body-parser');
 const crypto = require('crypto');
@@ -12,6 +7,11 @@ const https = require('https');
 const slackWebApi = require('@slack/web-api');
 const util = require('util');
 const winston = require('winston');
+
+const commandUtil = require('./command.js');
+const CommandHandler = commandUtil.CommandHandler;
+const CommandHandlers = commandUtil.CommandHandlers;
+const logsUtil = require('./logs.js');
 
 const readFile = (fileName) => util.promisify(fs.readFile)(fileName, 'utf8');
 
