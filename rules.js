@@ -153,7 +153,7 @@ class RulesHandler extends CommandHandler
                 type: 'modal',
                 title: {
                     type: 'plain_text',
-                    text: 'Update rules'
+                    text: 'Update Rules'
                 },
                 submit: {
                     type: 'plain_text',

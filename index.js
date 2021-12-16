@@ -656,6 +656,27 @@ app.post('/admin', async (req, res) => {
     }
 });
 
-app.listen(config.listeningPort, () => {
-    logger.info(`Listening for request from Slack on port ${config.listeningPort}`);
+let server = null;
+
+function listen(port)
+{
+    if (server)
+    {
+        server.close(() => {
+            server = null;
+            listen(port);
+        });
+    }
+    else
+    {
+        server = app.listen(port, () => {
+            logger.info(`Listening for requests from Slack on port ${port}`);
+        });
+    }
+}
+
+listen(config.listeningPort);
+
+configUtil.registerChangeListener('listeningPort', (port) => {
+    listen(port);
 });
