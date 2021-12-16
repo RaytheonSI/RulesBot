@@ -6,8 +6,13 @@ const logsUtil = require('./logs.js');
 const axios = require('axios');
 const bodyParser = require('body-parser');
 const express = require('express');
+const fs = require('fs');
+const https = require('https');
 const slackWebApi = require('@slack/web-api');
+const util = require('util');
 const winston = require('winston');
+
+const readFile = (fileName) => util.promisify(fs.readFile)(fileName, 'utf8');
 
 const headerBlock = {
     type: 'section',
@@ -309,6 +314,8 @@ async function checkChannelsAtInterval()
 
 // Set up handlers for Slack actions
 const app = express();
+
+app.disable('x-powered-by');
 
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
@@ -656,27 +663,88 @@ app.post('/admin', async (req, res) => {
     }
 });
 
-let server = null;
+(async () => {
+    // Load the TLS key/cert
+    const options = {};
 
-function listen(port)
-{
-    if (server)
+    async function loadOption(key, fileName)
     {
-        server.close(() => {
-            server = null;
-            listen(port);
-        });
+        options[key] = await readFile(fileName);
     }
-    else
+
+    try
     {
-        server = app.listen(port, () => {
-            logger.info(`Listening for requests from Slack on port ${port}`);
-        });
+        await loadOption('key', config.keyPath);
     }
-}
+    catch (err)
+    {
+        logger.error(`Failed to load TLS key: %O`, err);
+        process.exit(1);
+    }
 
-listen(config.listeningPort);
+    try
+    {
+        await loadOption('cert', config.certPath);
+    }
+    catch (err)
+    {
+        logger.error(`Failed to load TLS certificate: %O`, err);
+        process.exit(1);
+    }
 
-configUtil.registerChangeListener('listeningPort', (port) => {
-    listen(port);
-});
+    // Start HTTPS server
+    let server = null;
+
+    function listen(port)
+    {
+        if (server)
+        {
+            server.close(() => {
+                server = null;
+                listen(port);
+            });
+        }
+        else
+        {
+            server = https.createServer(options, app);
+            server.listen(port, () => {
+                logger.info(`Listening for HTTPS requests from Slack on port ${port}`);
+            });
+        }
+    }
+
+    listen(config.listeningPort);
+
+    // Restart server if port/key/cert is changed
+    configUtil.registerChangeListener('listeningPort', (port) => {
+        listen(port);
+    });
+
+    configUtil.registerChangeListener('keyPath', async (keyPath) => {
+        try
+        {
+            await loadOption('key', keyPath);
+        }
+        catch (err)
+        {
+            logger.warn(`Failed to load TLS key: %O`, err);
+            return;
+        }
+
+        listen(port);
+    });
+
+    configUtil.registerChangeListener('certPath', async (certPath) => {
+        try
+        {
+            await loadOption('cert', certPath);
+        }
+        catch (err)
+        {
+            logger.warn(`Failed to load TLS certificate: %O`, err);
+            return;
+        }
+
+        listen(port);
+    });
+})();

@@ -19,7 +19,7 @@ Customize app persona as desired under `Display Information`
 Select `Interactivity & Shortcuts` from the menu under `Features`
 
 1. Turn the `Interactivity` switch on
-2. Enter the address to RulesBot in the `Request URL` field with a **/actions** suffix (e.g. http://myhost:8080/actions)
+2. Enter the address to RulesBot in the `Request URL` field with a **/actions** suffix (e.g. https://myhost:4443/actions)
 3. Click `Save Changes`
 
 Select `Slash Commands` from the menu under `Features`
@@ -27,7 +27,7 @@ Select `Slash Commands` from the menu under `Features`
 1. Click the `Create New Command` button
 2. Enter the following values and click `Save`
     - `Command`: /rulesbot
-    - `Request URL`: the address to RulesBot with a **/admin** suffix (e.g. http://myhost:8080/admin)
+    - `Request URL`: the address to RulesBot with a **/admin** suffix (e.g. https://myhost:4443/admin)
     - `Short Description`: Administrate RulesBot
 
 Select `OAuth & Permissions` from the menu under `Features`
@@ -51,7 +51,7 @@ Select `OAuth & Permissions` from the menu under `Features`
 Select `Event Subscriptions` from the menu under `Features`
 
 1. Turn the `Enable Events` switch on
-2. Enter the address to RulesBot in the `Request URL` field with an **/events** suffix (e.g. http://myhost:8080/events); Note that RulesBot must already be running at the `Request URL` for this step to succeed
+2. Enter the address to RulesBot in the `Request URL` field with an **/events** suffix (e.g. https://myhost:4443/events); Note that RulesBot must already be running at the `Request URL` for this step to succeed
 3. Expand `Subscribe to bot events`, click `Add Bot User Event`, and select `app_mention`
 
 ## Installation
@@ -75,13 +75,15 @@ rulePosts.minMembers     | integer                  | yes      | the minimum num
 rulePosts.checkEverySecs | integer                  | yes      | the number of seconds between checking specified channels for the need to post
 rulePosts.postEveryMsgs  | integer                  | yes      | the number of messages without a rule post before another rule post
 rulePosts.footers        | array (string)           | no       | an array of quips to randomly select from and add the the bottom of posts
-listeningPort            | integer                  | yes      | the port on which to listen for HTTP requests
+listeningPort            | integer                  | yes      | the port on which to listen for HTTPS requests
+keyPath                  | string                   | yes      | the path to the TLS key
+certPath                 | string                   | yes      | the path to the TLS certificate
 
 The following is an example config:
 
 ```json
 {
-    "token": "MyBotUserOAuthTokenFromSlack",
+    "token": "xoxb-MyBotUserOAuthTokenFromSlack",
     "appName": "MyAppNameFromSlack",
     "rulePosts": {
         "channels": [ "general", "random" ],
@@ -93,7 +95,9 @@ The following is an example config:
             "HULK SMASH!"
         ]
     },
-    "listeningPort": 8080
+    "listeningPort": 4443,
+    "keyPath": "/path/to/key.pem",
+    "certPath": "path/to/cert.pem"
 }
 ```
 

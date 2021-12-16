@@ -128,8 +128,10 @@ const validations = {
                                       1,
                                       65536,
                                       'listeningPort',
-                                      'the HTTP listening port where requests from Slack are ' +
-                                      'expected')
+                                      'the HTTPS listening port where requests from Slack are ' +
+                                      'expected'),
+    'keyPath': validatePresent.bind(null, 'keyPath', 'the path to the TLS key'),
+    'certPath': validatePresent.bind(null, 'certPath', 'the path to the TLS certificate')
 };
 
 function validate(config)
