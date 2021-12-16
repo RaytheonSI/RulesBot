@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [[ $# < 1 ]]; then
+if [[ $# < 1 || $1 == "-h" || $1 == "--help" ]]; then
     echo ""
     echo "Usage: rulesbot.sh <command>"
     echo ""
@@ -9,6 +9,8 @@ if [[ $# < 1 ]]; then
     echo "      Check dependencies then start RulesBot as a detached, background process"
     echo "  stop"
     echo "      Stop RulesBot"
+    echo "  restart"
+    echo "      Restart RulesBot"
     echo ""
     exit 0
 fi
@@ -19,7 +21,8 @@ command=$1
 
 pidfile="$dir/rulesbot.pid"
 
-if [[ $command == "start" ]]; then
+start()
+{
     if [[ -e $pidfile ]]; then
         echo "It appears an instance is already running"
         echo "If not delete $pidfile and try again"
@@ -53,10 +56,17 @@ if [[ $command == "start" ]]; then
 
     echo "Started an instance in the background (pid: $pid)"
     echo "Check $logfile for status"
-elif [[ $command = "stop" ]]; then
+}
+
+stop()
+{
     if [[ ! -e $pidfile ]]; then
         echo "It does not appear that an instance is running"
-        exit 1
+        if [[ $1 ]]; then
+            return
+        else
+            exit 1
+        fi
     fi
 
     pid=$(<$pidfile)
@@ -70,7 +80,16 @@ elif [[ $command = "stop" ]]; then
     fi
 
     rm $pidfile
+}
+
+if [[ $command == "start" ]]; then
+    start
+elif [[ $command == "stop" ]]; then
+    stop false
+elif [[ $command == "restart" ]]; then
+    stop true
+    start
 else
-    echo "Unrecognized command $command"
+    echo "Unrecognized command: $command"
     exit 1
 fi
