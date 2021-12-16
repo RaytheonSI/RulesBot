@@ -1,7 +1,8 @@
 {
   "name": "RulesBot",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "description": "A Slack bot for reminding users of usage rules",
+  "repository": "github:RaytheonSI/RulesBot",
   "main": "index.js",
   "author": "John Heminghous",
   "license": "ISC",
