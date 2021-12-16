@@ -70,6 +70,7 @@ Name                     | Type                     | Required | Description
 ----                     | ----                     | -------- | -----------
 token                    | string                   | yes      | the `Bot User OAuth Token` from Slack
 appName                  | string                   | yes      | the `App Name` from Slack
+signingSecret            | string                   | yes      | the `Signing Secret` from Slack
 rulePosts.channels       | string or array (string) | yes      | either *all* or an array of channel names to post to
 rulePosts.minMembers     | integer                  | yes      | the minimum number users that must be a member of a specified channel to post to
 rulePosts.checkEverySecs | integer                  | yes      | the number of seconds between checking specified channels for the need to post

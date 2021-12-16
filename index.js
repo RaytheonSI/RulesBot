@@ -5,6 +5,7 @@ const logsUtil = require('./logs.js');
 
 const axios = require('axios');
 const bodyParser = require('body-parser');
+const crypto = require('crypto');
 const express = require('express');
 const fs = require('fs');
 const https = require('https');
@@ -13,48 +14,6 @@ const util = require('util');
 const winston = require('winston');
 
 const readFile = (fileName) => util.promisify(fs.readFile)(fileName, 'utf8');
-
-const headerBlock = {
-    type: 'section',
-    text: {
-        type: 'mrkdwn',
-        text: 'Here\'s an excerpt from the '
-    }
-};
-
-const rulesBlock = {
-    type: 'section',
-    text: {
-        type: 'mrkdwn',
-        text: ''
-    }
-};
-
-const DIVIDER_BLOCK = { type: 'divider' };
-
-const footerBlock = {
-    type: 'section',
-    text: {
-        type: 'mrkdwn',
-        text: ''
-    }
-};
-
-const VIEW_ALL_ACTION_ID = 'view-all-rules';
-
-const VIEW_ALL_BUTTON_BLOCK = {
-    type: 'actions',
-    elements: [
-        {
-            type: 'button',
-            text: {
-                type: 'plain_text',
-                text: 'View all rules'
-            },
-            action_id: VIEW_ALL_ACTION_ID
-        }
-    ]
-};
 
 const logger = winston.createLogger({
     level: 'info',
@@ -135,6 +94,48 @@ async function lookupChannelByName(name)
 
     return null;
 }
+
+const headerBlock = {
+    type: 'section',
+    text: {
+        type: 'mrkdwn',
+        text: 'Here\'s an excerpt from the '
+    }
+};
+
+const rulesBlock = {
+    type: 'section',
+    text: {
+        type: 'mrkdwn',
+        text: ''
+    }
+};
+
+const DIVIDER_BLOCK = { type: 'divider' };
+
+const footerBlock = {
+    type: 'section',
+    text: {
+        type: 'mrkdwn',
+        text: ''
+    }
+};
+
+const VIEW_ALL_ACTION_ID = 'view-all-rules';
+
+const VIEW_ALL_BUTTON_BLOCK = {
+    type: 'actions',
+    elements: [
+        {
+            type: 'button',
+            text: {
+                type: 'plain_text',
+                text: 'View all rules'
+            },
+            action_id: VIEW_ALL_ACTION_ID
+        }
+    ]
+};
 
 function constructRandomRuleMessage()
 {
@@ -317,18 +318,55 @@ const app = express();
 
 app.disable('x-powered-by');
 
-app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
+const rawBodySaver = (req, res, buf, encoding) => {
+    if (buf && buf.length)
+    {
+        req.rawBody = buf.toString(encoding || 'utf8');
+    }
+};
+
+app.use(bodyParser.urlencoded({ verify: rawBodySaver, extended: false }));
+app.use(bodyParser.json({ verify: rawBodySaver }));
 
 // An endpoint to identify this service (not used by Slack)
 app.get('/', (req, res) => {
     res.send('RulesBot');
 });
 
+function verifySlackRequest(req)
+{
+    const signature = req.headers['x-slack-signature'];
+    if (!signature) return false;
+
+    const now = Date.now() / 1000;
+    const timestamp = req.headers['x-slack-request-timestamp'];
+    if (!timestamp) return false;
+
+    if ((now - timestamp) > 60)
+    {
+        return false; // request older than a minute, could be a replay attack
+    }
+
+    const value = 'v0:' + timestamp + ':' + req.rawBody;
+
+    const hmac = crypto.createHmac('sha256', config.signingSecret);
+    hmac.update(value);
+
+    return 'v0=' + hmac.digest('hex') === signature;
+}
+
 // An endpoint to handle actions (e.g. when buttons on posts are clicked)
 const rulesHandler = new rulesUtil.RulesHandler(client);
 
 app.post('/actions', async (req, res) => {
+    if (!verifySlackRequest(req))
+    {
+        res.status(403).end();
+
+        logger.warn(`Unauthorized POST /actions from ${req.ip}`);
+        return;
+    }
+
     let responseUrl = '';
     let user = '';
     let channel = '';
@@ -412,6 +450,14 @@ app.post('/actions', async (req, res) => {
 
 // An endpoint to handle events (e.g. users chatting with this bot)
 app.post('/events', async (req, res) => {
+    if (!verifySlackRequest(req))
+    {
+        res.status(403).end();
+
+        logger.warn(`Unauthorized POST /events from ${req.ip}`);
+        return;
+    }
+
     const payload = req.body;
 
     if (payload.type === 'url_verification')
@@ -607,6 +653,14 @@ commandHandlers.add(rulesHandler);
 commandHandlers.add(new PostHandler());
 
 app.post('/admin', async (req, res) => {
+    if (!verifySlackRequest(req))
+    {
+        res.status(403).end();
+
+        logger.warn(`Unauthorized POST /admin from ${req.ip}`);
+        return;
+    }
+
     const payload = req.body;
 
     const commandInfo = `admin command "${payload.text}" from @${payload.user_name} ` +

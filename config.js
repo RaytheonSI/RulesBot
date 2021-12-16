@@ -92,6 +92,7 @@ function validateInt(required, min, max, name, description, value)
 const validations = {
     'token': validatePresent.bind(null, 'token', 'the Slack OAuth token'),
     'appName': validatePresent.bind(null, 'appName', 'the Slack app/bot name'),
+    'signingSecret': validatePresent.bind(null, 'signingSecret', 'the Slack'),
     'rulePosts.channels': validateStringArray.bind(null,
                                                    true,
                                                    'all',
