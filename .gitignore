@@ -1,3 +1,5 @@
 config.json
 rules.txt
 node_modules
+rulesbot.log
+rulesbot.pid
