@@ -99,9 +99,11 @@ const headerBlock = {
     type: 'section',
     text: {
         type: 'mrkdwn',
-        text: 'Here\'s an excerpt from the '
+        text: ''
     }
 };
+
+const HEADER_PREFIX = 'Here\'s an excerpt from the ';
 
 const rulesBlock = {
     type: 'section',
@@ -143,7 +145,7 @@ function constructRandomRuleMessage()
 
     const rules = rulesUtil.getRules();
 
-    headerBlock.text.text += '*' + rules.title + '*';
+    headerBlock.text.text = HEADER_PREFIX + '*' + rules.title + '*';
     blocks.push(headerBlock);
 
     const rule = rulesUtil.pickRandomRule(rules);
